@@ -1,0 +1,11 @@
+16/7/2020		DAMIAN
+	
+	*Se agrego el "nivel C", esto es, un cambio de colores en la pantalla cada una cierta cantidad de puntaje, que se definen desde un EQU al principio (por defecto ahora esta en 20). El efecto del nivel C no es otro que el de cambiar el valor de la posicion de memoria $5EFF para que el bitmap display deje de verse como RGB y se vea como GRB, intercambiando algunos de los colores.
+
+	*Otras ideas para hacer:
+-	¿Que hacemos cuando dino muere?
+-	Un tipo de nivel que se active onda lvlc, pero que en vez de cambiar de color desplaze toda la pantalla para arriba, o para abajo. De la misma manera seria interesante hacerla prenderse y apagarse para que uno tenga que memorizar cuando era el salto.
+
+18/7/2020
+
+	*Se agrego una pequeña animacion para cuando dino muere	 

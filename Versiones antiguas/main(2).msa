@@ -1,0 +1,79 @@
+	p68h11
+
+STACK	equ	$6000
+RAM	equ	$2000
+N	equ	3			;numero maximo de obstaculos en pantalla
+OBJ_SZ	equ	2			;tamaño que ocupa cada objeto en memoria (es una direccion de mem)
+
+         	org	RAM
+main 	equ	*
+	lds	#TOS
+
+*
+*	Checkeo si dino esta en el aire
+*
+	
+mloop	ldaa	intheg
+	beq	inthea			;salta a la etiqueta si esta en el aire
+					;etapa de inicializacion del salto actual
+*
+*	Checkeo el estado del salto de dino
+*
+
+inthea	ldx	posact
+	cpx	jumpf			;si no llego al fin del salto, va a la proxima label
+	bne	updobj
+					;codigo si llego a la parte mas alta del salto	
+updobj					;codigo de sumar una unidad de salto a la posicion actual del jugador (es decir, subir al jugador una fila en el bitmap hacia arriba)	
+
+*
+*	Muevo la posicion los obstaculos a la izquierda
+*
+	ldx	objmp					
+loopobj1	ldy	0,X			;cargo el puntero al objeto del vector
+	beq	updtedo			;si leyo un 0, entonces llego al ultimo objeto a analizar
+	dey				;si no restamos uno a la posicion actual del objeto en el vector	
+	sty	0,X			;guardamos la nueva posicion del objeto en el vector
+					;codigo para destruir el objeto si se fue por la izquierda de la pantalla
+	ldab	#OBJ_SZ			;cargo la longitud de la direccion de cada objeto
+	abx				;me muevo al siguiente objeto
+	bra	loopobj1			;actualizo el siguiente objeto
+
+*
+*	Verifico si Dino choco contra algun objeto
+*
+
+updtedo	ldx	objmp			
+loopobj2	ldy	0,X			;cargo el puntero al objeto del vector
+	beq	continue			;si el objeto leido es nulo, llegamos al final del vector y el jug sigue vivo
+	cpy	#posact			;comparo la posicion del objeto con la del jugador actual
+	beq	dead			;si hay un objeto donde esta el jugador, matarlo 
+	ldab	#OBJ_SZ			;sino ir al siguiente objeto del vector
+	abx
+	bra	loopobj2			;repetir comprobacion
+
+*
+*	RIP DINO
+*		
+dead					;funcion rip dino
+
+*
+*	el juego continua	
+*
+continue					;funcion generar objeto
+
+	org	STACK	
+stk	rmb	20
+TOS	equ	*-1
+
+intheg	fcb	$00			;1 si es en el suelo, 0 si en el aire
+jump1f	fcb	$00			;salto de tipo 1 activo
+jump2f	fcb	$00			;salto de tipo 2 activo
+jumpi	fdb	$0000			;posicion de inicio del salto
+jumpf	fcb	$0000			;posicion de fin del salto
+subiendo	fcb	$00			;1 si esta subiendo, 0 si esta bajando
+posact	fdb	$0000			;posicion actual del jugador en la pantalla
+objmp	fdb	$0000,$0000,$0000,$0000	;reservo espacio para hasta 3 objetos en pantalla y un terminador $0000
+puntaje	fdb	$0000			;puntaje que se mostrara en el display	
+
+	end

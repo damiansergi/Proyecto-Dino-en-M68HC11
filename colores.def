@@ -1,0 +1,23 @@
+	p68H11
+*
+*
+*************************************************************************
+*									*
+*	En la posicion de memoria $5EFF debe haber $00			*
+*									*
+*************************************************************************
+*
+*
+negro	EQU	$00	
+agua	EQU	$01
+cielo	EQU	$0F
+arena	EQU	$28
+cldino	EQU	$04	
+rojo	EQU	$20
+verde	EQU	$08
+amarillo	EQU	$3D
+amarill	EQU	$3D
+subma	EQU	$41
+cargue	EQU	$81
+*
+*

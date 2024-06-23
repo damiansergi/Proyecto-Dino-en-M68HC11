@@ -1,0 +1,159 @@
+	p68h11
+*
+*
+*
+$disptec.DEF		incluyo las definiciones dadas por la catedra para el teclado y el display
+$colores.DEF		incluyo las definiciones de los colores
+*
+*
+*
+	ORG	$2000
+main	EQU	*
+	cli		habilito las interrupciones no enmascarables
+	lds	#stackp
+	jsr	initdis	inicializo display y teclado
+	jsr	start0	inicializo el display con "0000"
+	jsr	inibdis	inicializo el bitmap display con el background del juego y el personaje
+
+
+*
+*
+*
+*****************************************************************************************
+*											*
+*	subrutina start0: esta se encarga de empezar el display en 0000			*
+*	No recibe ni devuelve parametros						*
+*											*
+*****************************************************************************************
+*
+*
+*
+start0	EQU	*
+	psha		programacion defensiva
+	pshb
+	ldaa	#$30	cargo el 0 en A y luego lo imprimo en cada posicion del display
+	ldab	#0	
+	jsr	outchar	
+	ldab	#1
+	jsr	outchar
+	ldab	#2
+	jsr	outchar	
+	ldab	#3	
+	jsr	outchar
+	pulb		recupero los registros
+	pula
+	rts
+*
+*
+*
+*************************************************************************************************************************
+*															*
+* Subrut: inibdis Esta subrutina se encarga de colocar todos las posiciones del bitmap display en su estado inicial	*
+*	es decir con el cuadrado verde (dino) a la izquierda y el paisaje detras. No recibe ni devuelve parametros	*
+*							    								*
+*************************************************************************************************************************
+*
+*
+*
+inibdis	EQU	*	
+	psha		*Programacion defensiva
+	pshb
+	pshx
+	ldaa	#cielo	*cargo en el registro A el valor del color cielo
+	ldab	#30	*cargo en el registro B el contador de posiciones
+	ldx	#$5F00	*cargo en el registro X el valor inicial del bitmap display
+sigodi1	staa	0,X	*coloco las primeras 6 posiciones con arena
+	inx		*avanzo a la siguente posición
+	decb		*reduzco en uno el contador	
+	beq	inidis1	*me fijo si ya modifique todas las posiciones
+	jmp	sigodi1	*si el contador no llego a cero continuo 
+inidis1	ldaa	#arena	*cargo en el registro A el valor del agua
+	ldab	#6	*cargo en el registro B el contador de posiciones
+sigodis	staa	0,X	*coloco la posicion con agua
+	inx		*avanzo a la siguente posición
+	decb		*reduzco en uno el contador	
+	beq	inidis2	*me fijo si ya modifique todas las posiciones
+	jmp	sigodis	*si el contador no llego a cero continuo 
+inidis2	ldx	#$5F18
+	ldaa	#cldino
+	staa	0,X
+	pulx		*recupero registros
+	pulb
+	pula
+	rts
+*
+*
+*
+*	LO IDEAL SERIA EN UN FUTURO QUE RETARDO TOME DATOS DEL STACK (O DEL FP DEL MAIN, O UN REGISTRO) PARA VARIAR FACILMENTE
+*	LA DURACION DEL RETARDO EN TIEMPO DE JUEGO, Y CON ELLO TAMBIEN LA DIFICULTAD DEL MISMO
+*
+*
+*****************************************************************
+*	la subrutina retardo: 					*
+*	la misma no tiene parametros de entrada ni de salida	*
+*	su unica funcion es de generar un retardo		*
+*	una vez sea invocada					*
+*****************************************************************
+*
+*
+*
+retardo	equ	*
+	pshx		*programacion defensiva: salvo los valores de los registros que voy a utilizar
+	pshy	
+	ldy	#12
+loop2	ldx	#55553	*este es el numero que descontaremos (las cuentas anteriores lo prueban correcto)
+loop1	dex		*decremento el numero para generar el tiempo que me hace falta
+	bne	loop1	*checkeo si el numero llego a 0, si no sigo descontando. Si ha llegado a 0 sigue
+	dey		*checkea si ya decremente el numero a 0 tres veces
+	bne	loop2	*si no vuelve hacerlo
+	puly
+	pulx		*salvo los registros que habia guardado ni bien comenzaba la rutin
+	rts		*lo correcto seria un rts que devuelva a donde se haya llamado a la subrutina
+*
+*
+*
+******************************************************
+**** Inicializa display (y teclado)******************
+*****************************************************
+*
+*
+initdis	equ	*
+	
+		psha
+
+		ldaa #$0F       ;set for input/output
+		staa DDRC       ;C output
+		ldaa PIOC       ;get current value
+		anda #$FE       ;reset bit 0 to 0
+		staa PIOC       ;send it out
+	
+		pula
+		rts
+*
+*
+**************************************
+*Outchar: ACCA: Carácter a enviar
+*	    ACCB: Posición (0-3)
+**************************************
+*
+*
+outchar	equ	*
+	
+		stab PORTCL     ;set the position 
+		staa PORTB      ;set the character
+	
+		rts
+*
+*
+*
+	ORG	$5EFF	Fuerzo un cero en la posicion de memoria $5EFF para que el display se lea RGB
+	FCB	$00
+*
+*
+*
+stack	RMB	100
+stackp	EQU	*-1
+*
+*
+*
+	END

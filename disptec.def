@@ -1,0 +1,24 @@
+	p68H11
+
+******* Ports ***************************
+
+DDRC	equ $1007	;data direction register for C
+PIOC	equ $1002	;for strobe B assertion change
+PORTCL	equ $1005	;port C latched
+PORTB	equ $1004	;port B
+PORTC	equ $1003	;rows
+
+
+******* Cols and Row Ports **************
+
+ROWS	equ	PORTC	;outputs
+COLS	equ	PORTCL	;inputs
+
+***** Row Masks *************************
+
+FIL0	equ	00001110b  ;mascaras para manejo de filas
+FIL1	equ	00001101b
+FIL2	equ	00001011b
+FIL3	equ	00000111b
+
+****** Keyboard Mask ********************

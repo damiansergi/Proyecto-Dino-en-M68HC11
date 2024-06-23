@@ -1,0 +1,674 @@
+	p68h11
+
+*********************************************************************************************************************************
+*																*
+*								DINO.msa 							*
+*																*
+*	Antes de jugar debe ajustar la velocidad del juego (GAME_S) dependiendo la velocidad de simulacion de su computadora	*
+*	Tambien debe hacerlo para ajustar la dificultad del juego.								*
+*	Importante tambien tener los 2 archivos de definiciones que estan en el drive						*
+*	Como jugar:	Al presionar y soltar IRQ se realiza un salto de un bloque						*
+*			Al presionar y soltar XIRQ se realiza un salto de dos bloques						*
+*			En el display se mostrará el puntaje que va llevando a lo largo del juego				*
+*			Para resetear el juego, debe despausar la simulacion, apretar RESET del wookie y luego recomenzar	*
+*			la simulacion												*
+*																*
+*********************************************************************************************************************************
+
+* NOTA: Pueden encontrarse algunas malas practicas de programacion (no muchas, en especial el hardcodeo de valores en subrutinas) 
+* debido a la informalidad del desarrollo del juego
+
+$disptec.DEF				;incluyo las definiciones dadas por la catedra para el teclado y el display
+$colores.DEF				;incluyo las definiciones de los colores
+
+STACK	equ	$4000
+RAM	equ	$2000
+IRQ	equ	$FFF2			;interrupcion IRQ
+XIRQ	equ	$FFF4			;interrupcion XIRQ
+ISALT1	equ	$5000			;ubicacion de la subrutina de interrupcion 1
+ISALT2	equ	$5500			;ubicacion de la subrutina de interrupcion 2
+N	equ	3			;numero maximo de obstaculos en pantalla
+JSIZE	equ	6			;tamaño de la unidad de salto del personaje
+GAME_S	equ	6			;velocidad de desplazamiento de los objetos
+SCRADJ	equ	4			;score adjust, valor para ajustar el contador de puntos
+*					;define cada cuantos frames se suma puntaje en el display
+FRMRES	equ	3			;restriccion de frames para la creacion de objetos dobles sucesivos
+frqlevc	equ	20			;defino la frecuencia con la cual aparecen los niveles "C"
+*					;no deberia ser menor o igual a 7, ya que esta es la duracion maxima de un nivel c
+
+	org	0
+obj	equ	*			;creamos la estructura objeto
+lifetim	rmb	1
+pos	rmb	6
+color	rmb	1
+obj_sz	equ	*-obj
+
+	org	RAM
+main 	equ	*
+	lds	#TOS
+	cli				;habilitamos las interrupciones para los saltos (IRQ: salto 1 - XIRQ: salto 2)
+	ldaa	#0			;transfiero $00 al CCR para forzar un 0 en X del CCR, creemos que esto activa la interr XIRQ
+	tap				
+	jsr	initdis			:inicializo display y teclado
+	ldx	#0
+	stx	puntaje			;inicializo el puntaje en 0
+	jsr	shwdisp			;inicializo el display con "0000"
+	stx	jumpf			;inicializo el fin del salto en 0 
+	ldx	#$5F18
+	stx	posact			;inicializo la posicion actual del jugador
+	ldaa	#0
+	staa	ejump			;inicializo la habilitacion del salto
+	staa	enabgen			;habilito al generador de objetos
+	ldaa	#SCRADJ
+	staa	scoreadj		;inicializo el ajuste del puntaje
+	ldaa	#N			;luego inicializare los lifetime de todos los objetos en $FF, para indicar que se puede
+	ldx	#objmp			;generar un objeto en cada uno de ellos
+mainlp1	ldab	#$FF			;inicializo los lifetime de todos los objetos en $FF
+	stab	lifetim,X
+	deca
+	beq	inicend
+	ldab	#obj_sz			;cargo la longitud de la direccion de cada objeto
+	abx				;me muevo al siguiente objeto si no cambie todos los lifetime
+	jmp	mainlp1	
+inicend	jsr	inibdis			;inicializo el bitmap display con el background del juego y el personaje.
+
+*
+*	Veo el estado del salto de dino, y en consecuencia decido si actualizar la posicion del jugador
+*
+	
+mloop	ldx	#GAME_S			;cargamos la velocidad de desplazamiento de los objetos
+	jsr	delayX			;realizamos un retardo
+	ldaa	ejump			;checkeo si el salto esta habilitado, en ese caso voy a correr los objetos a la izquierda
+	beq	movobj1			;caso contrario el salto no esta habilitado	
+	ldx	posact			;cargamos la posicion actual del jugador
+	cpx	jumpf			;comparamos la posicion actual con la del fin del salto
+	beq	godown			;en ese caso salto a cambiar el estado a bajando	
+	ldaa	subiendo		;vemos si el jugador esta subiendo o bajando
+	beq	actposd			;si el jugador esta bajando, actualizamos su posicion
+	ldaa	posact+1		;cargamos la parte baja de la direccion de memoria de la posicion de dino
+	ldab	#JSIZE			;cargamos el tamaño del salto
+	sba				;movemos la posicion de dino hacia arriba
+	staa	posact+1		;guardamos la posicion actualizada
+	bra	movobj1			;vamos a desplazar los objetos a la izquierda
+godown	ldaa	#$00			
+	staa	subiendo		;cambiamos el estado del jugador al bajando
+actposd	ldab	#JSIZE			;cargamos el tamaño del salto
+	ldx	posact			;cargamos la posicion actual del personaje
+	abx				;movemos al personaje para abajo
+	stx	posact			;actualizamos la posicion actual del jugador
+	ldx	jumpi			;cargamos el inicio del salto
+	cpx	posact			;verificamos si el jugador llego o no al inicio del salto
+	beq	fshjump			;si llego al inicio del salto habilitaremos el salto para que pueda saltar de vuelta
+	bra	movobj1			;vamos a desplazar los objetos a la izquierda
+
+fshjump	ldaa	#$00	
+	staa	ejump			;habilitamos el salto
+
+*
+*	Muevo la posicion los obstaculos a la izquierda
+*
+
+movobj1	ldaa	#N			;inicio un contador en A con la cantidad de obstaculos
+	ldx	#objmp			;apunto al array con los obstaculos
+movobj2	ldab	lifetim,X		;cargo en B el lifetime del objeto
+	cmpb	#$FF			;checkeo si el lifetime es $FF, en ese caso el objeto ya se fue de la pantalla
+	beq	alsigob			;si el objeto se fue de la pantalla simplemente me muevo al siguiente
+	decb				;en el caso contrario decremento el lifetime del objeto 
+	stab	lifetim,X			
+loopobj1	ldy	pos,X		;cargo el puntero al objeto del vector
+	dey				;le decremento uno para moverlo a la izquierda y lo vuelvo a guardar 		
+	sty	pos,X	
+	ldy	pos+2,X			;cargo la siguiente posicion del bloque del obstaculo (distinta de 0 solo si es el de 2)
+	beq	alsigob			;en el caso de que sea el terminador ya movi todos los bloques
+	dey				;caso contrario muevo la posicion del bloque a la izquierda		
+	sty	pos+2,X	
+alsigob	deca				;decremento el contador
+	beq	updtedo			;si el contador llego a cero, entonces ya habre revisado todos los obstaculos
+	ldab	#obj_sz			;si el contador no llego a cero, me muevo al siguiente objeto
+	abx				
+	jmp	movobj2
+
+*
+*	Verifico si Dino choco contra algun objeto
+*
+
+
+updtedo	ldx	#objmp
+	ldaa	#N			;inicializo un contador con la cantidad de objetos		
+loopobj2	ldab	lifetim,X	;cargo el lifetime del objeto en B
+	bne	updted1			;si el lifetime es distinto de 0, entonces es imposible que este en la misma pos. que dino
+	ldy	pos,X			;si el lifetime es 0, me fijo si alguna de las posiciones choca con dino
+	beq	updted1			;si esa posicion era 0000, entonces era el terminador y ya compare con todos los bloques	
+	cpy	posact			;si no es el terminador la comparo con dino
+	beq	dead			;si son iguales rip dino
+	ldy	pos+2,X			;si el lifetime es 0, me fijo si alguna de las posiciones choca con dino
+	beq	updted1			;Si esa posicion era 0000, entonces era el terminador y ya compare con todos los bloques	
+	cpy	posact			;si no es el terminador la comparo con dino
+	beq	dead			;si son iguales rip dino
+updted1	deca				;decremento el contador
+	beq	continue		;en el caso de que el contador haya llegado a 0, se habran checkeado todos los obstaculos
+	ldab	#obj_sz			;sino ire al siguiente objeto del vector
+	abx
+	jmp	loopobj2	
+
+*
+*	RIP DINO
+*	
+	
+dead	EQU	*			;funcion rip dino
+	jsr	ripscrn			;llamo a la funcion encargada de mostrar en el display la muerte de dino
+riprip	jmp	riprip
+
+*
+*	el juego continua	
+*
+
+continue	ldaa	scoreadj			;cargamos el contador de puntos restantes para sumar un punto en el display
+	beq	incp			;si el contador llego a 0, incrementamos un punto en el contador
+	deca				;si no, decrementamos 1 al ajuste
+	staa	scoreadj		;actualizamos el ajuste
+	bra	nincp
+incp	ldx	puntaje			;ya que scoreadj llego a cero, incrementaremos el puntaje actual
+	inx
+	stx	puntaje			;guardamos el puntaje incrementado en 1 
+	ldaa	#SCRADJ			;cargamos el ajuste de puntos
+	staa	scoreadj		;volvemos a restaurar el ajuste
+	ldx	puntaje			
+	jsr	shwdisp			;imprimimos el nuevo puntaje en el display
+	ldx	puntaje			;vuelvo a cargar el puntaje para ver si esta nivel será nivel c
+	xgdx				;muevo el puntaje a D
+	ldx	#frqlevc		;dividiré por la frecuencia con la que determine que sucedera clevel
+*					;y vere que el resto sea cero, ya que quiero que clevel pase con esa frecuencia
+	idiv				;hago la division dicha previamente
+	tstb				;me fijo si el resto es igual o menor que cero.
+	bne	nnewlev
+	jsr	n_rand1			;genero un numero random entre 0 y 7
+	staa	colevel			;que nos definira la cantidad de niveles proximos con el color cambiado
+nnewlev	jsr	clevel			;verifico si hace falta cargar el nivel c o no
+nincp	jsr	actdisp			;actualizamos todos los cambios que se hicieron en el display
+	ldaa	enabgen			;checkeo si el generador esta habilitado
+	bne	nogen			;si no lo esta, no generare ningun objeto
+	jsr	generar			;en el caso contrario generare un nuevo objeto "random"
+	bra	cestout
+nogen	deca
+	staa	enabgen			;o quizas la siguiente, esto depende del delay de generacion puesto en la subrutina
+	ldaa	objrec			;verificamos si hay que incrementar el contador de bloque 2 creado
+	beq	cestout			;si salta a la label es porque no hay un bloque de 2 creado
+	inc 	frmcnt			;incrementamos el contador de frames
+cestout	jmp	mloop		
+*
+*
+*
+*						SUBRUTINAS
+*
+*
+*
+*************************************************************************************************************************
+*															*
+*  Subrut generar: Esta subrutina se encarga de generar un obstaculo "random". No recibe ni devuelve parametros		*
+*  Para generar un obstaculo requiere de un objeto que tenga lifetime $FF, esto significa que el objeto ya esta "fuera"	*
+*  de la pantalla y entonces se lo puede reemplazar por uno util. 							*
+*							    								*
+*************************************************************************************************************************
+*
+*
+generar	EQU	*
+	pshx			;programacion defensiva
+	pshy
+	psha
+	pshb
+	ldaa	#N		;inicializo un contador con la cantidad de obstaculos
+	ldx	#objmp		;apunto al array de los obstaculos
+genloop	ldab	lifetim,X	;checkeo el lifetime de cada objeto
+	cmpb	#$FF		;si el lifetime del objeto es $FF, entonces esta "disponible" para ser reemplazado por el nuevo	
+	beq	beging		;en este caso comienza la subrutina a generar obstaculos
+	deca			;en el caso contrario decremento el contador de obstaculos
+	beq	genend		;si ya pase por todos los obstaculos, dejo de contar
+	ldab	#obj_sz		;caso contrario me muevo al siguiente objeto
+	abx		
+	jmp	genloop
+beging	jsr	n_rand		;genero un numero random en el accA entre 0 y 3
+	cmpa	#0		;si el numero generado es 0  descarto el generar obstaculo
+	beq	genend
+	cmpa	#1		;si el numero generado es 1, genero el obstaculo de un bloque
+	beq	genobs1
+	cmpa	#2		;si el numero generado es 2, genero el obstaculo de 2 bloques
+	beq	genobs2
+	jmp	genobs3		;si el numero generado es 3, genero el obstaculo "pajaro"
+genobs1	ldy	#obstac1
+	jsr	strcopy		;copio los valores de la tabla del generador para el obstaculo 1 directo al array de objetos
+	jmp	genend
+genobs2	ldaa	objrec		;verificamos si el ultimo objeto creado es uno de 2 bloques
+	beq	create		;si no se creo un objeto de 2 como ultimo objeto, creamos el objeto de 2 bloques directamente
+	ldaa	frmcnt		;si el ultimo objeto creado es de 2 bloques, verificamos que hayan pasado al menos FRMRES frames antes de crear el nuevo bloque de 2
+	cmpa	#FRMRES		
+	blo	ignore		;si no pasaron al menos FRMRES frames desde el ultimo objeto de 2, no lo creamos
+	ldaa	#0		;sino, reiniciamos el contador de frames 
+	staa	frmcnt
+create	ldy	#obstac2
+	jsr	strcopy		;copio los valores de la tabla del generador para el obstaculo 2 directo al array de objetos
+	ldaa	#$FF		;cargamos el valor $FF para guardar en objrec
+	staa	objrec		
+ignore	jmp	genend
+
+genobs3	ldy	#obstac3
+	jsr	strcopy		;copio los valores de la tabla del generador para el obstaculo 3 directo al array de objetos	
+genend	ldaa	#2
+	staa	enabgen
+	pulb			;recupero los registros que salve y vuelvo al main
+	pula
+	puly
+	pulx
+	rts
+
+
+*************************************************************************************************************************
+*															*
+*  Subrut strcopy: Recibe por parametro un puntero origen por el registro Y y un puntero destino por X. 			*
+*	
+*							    								*
+*************************************************************************************************************************
+*
+*
+*
+strcopy	EQU	*	copia los valores de la tabla al generador de objetos
+	psha		prog defensiva
+	pshb
+	pshy
+	pshx
+	ldab	#obj_sz	Inicializo en B un contador con la cantidad de posiciones a copiar
+strloop	ldaa	0,Y	tomo un valor de la tabla
+	staa	0,X	lo copio en el array de los objetos
+	iny		me muevo a las siguientes posiciones a copiar
+	inx
+	decb		decremento el contador
+	bne	strloop	si no llego a cero sigo copiando
+	pulx		recupero los registros
+	puly
+	pulb
+	pula
+	rts
+
+*
+*
+*
+*************************************************************************************************************************
+*															*
+*  Subrut actdisp: Esta subrutina se encarga de actualizar todos las posiciones del bitmap display a su estado actual	*
+* teniendo en cuenta la posicion de los objetos, dino y el paisaje							*
+*							    								*
+*************************************************************************************************************************
+*
+*
+*
+actdisp	EQU	*	
+	psha			;Programacion defensiva
+	pshb
+	pshx
+	pshy
+	ldaa	#cielo		;cargo en el registro A el valor del color cielo
+	ldab	#30		;cargo en el registro B el contador de posiciones
+	ldx	#$5F00		;cargo en el registro X el valor inicial del bitmap display
+actdis1	staa	0,X		;coloco las primeras 30 posiciones con cielo
+	inx			;avanzo a la siguente posición
+	decb			;reduzco en uno el contador	
+	beq	actdis4		;me fijo si ya modifique todas las posiciones del cielo
+	jmp	actdis1		;si el contador no llego a cero continuo 
+
+actdis4	ldx	posact		;imprimo en el bitmap la posicion actual del jugador
+	ldaa	#cldino
+	staa	0,X
+actdis5	ldx	#objmp
+	ldaa	#N		;inicializo un contador con la cantidad de objetos		
+actloop	ldab	lifetim,X	;cargo el lifetime del objeto en B
+	cmpb	#$FF		;si el lifetime es $FF no me interesa imprimirlo
+	beq	actdis6		
+	ldy	pos,X			
+	beq	actdis6		;Si esa posicion era 0000, entonces era el terminador y ya compare con todos los bloques	
+	ldab	color,X
+	stab	0,Y
+	ldy	pos+2,X			
+	beq	actdis6		;Si esa posicion era 0000, entonces era el terminador y ya compare con todos los bloques
+	ldab	color,X
+	stab	0,Y	
+actdis6	deca			;decremento el contador
+	beq	actfin		;en el caso de que el contador haya llegado a 0, se habran actualizado
+	ldab	#obj_sz		;sino ire al siguiente objeto del vector
+	abx
+	jmp	actloop
+actfin	puly
+	pulx			;recupero registros
+	pulb
+	pula
+	rts
+*
+*
+*
+*************************************************************************************************
+*												*
+*	shwdisp: La subrutina recibe por el registro X un valor de 16 bits que mostrara en el 	*			
+*	display. No devuelve parametros.							*			
+*												*									
+*************************************************************************************************
+*
+*
+*
+shwdisp	EQU	*
+	psha		;programacion defensiva
+	pshb
+	
+	xgdx		;muevo el numero al registro D
+	ldx	#1000	;cargamos el numero 1000 para filtrar los miles del numero
+	idiv		;divimos el numero por 1000 y mostramos la unidad 
+	xgdx		;muevo resultado al registro D y guardo el resto en X
+	pshb		;cargamos el numero a mostrar en A
+	pula
+	ldab	#$30	;cargamos el valor 0 en ASCII para pasar el numero decimal a ASCII
+	aba		;convertimos el numero decimal en ASCII
+	ldab	#3	
+	jsr	outchar	;mostramos el primer
+	
+	xgdx
+	ldx	#100	;cargamos el numero 100 para filtrar las centenas del numero
+	idiv		;divimos el numero por 100 y mostramos la unidad 
+	xgdx		;muevo resultado al registro D y guardo el resto en X
+	pshb		;cargamos el numero a mostrar en A
+	pula
+	ldab	#$30	;cargamos el valor 0 en ASCII para pasar el numero decimal a ASCII
+	aba		;convertimos el numero decimal en ASCII
+	ldab	#2	
+	jsr	outchar	;mostramos el primer
+
+	xgdx
+	ldx	#10	;cargamos el numero 10 para filtrar las decena del numero
+	idiv		;divimos el numero por 10 y mostramos la unidad 
+	xgdx		;muevo el entero al registro D y el resto a X
+	pshb		;cargamos el numero a mostrar en A
+	pula
+	ldab	#$30	;cargamos el valor 0 en ASCII para pasar el numero decimal a ASCII
+	aba		;convertimos el numero decimal en ASCII
+	ldab	#1	
+	jsr	outchar	;mostramos el primer
+	
+
+	xgdx		;muevo el entero al registro D y el resto a X
+	pshb
+	pula		;movemos la unidad al registro A
+	ldab	#$30	;cargamos el valor 0 en ASCII para pasar el numero decimal a ASCII
+	aba		
+	ldab	#0	
+	jsr	outchar	
+
+	pulb		;recupero los registros
+	pula
+	rts
+*
+*
+*
+*************************************************************************************************************************
+*															*
+* Subrut clevel: Esta subrutina se encarga de manejar el nivel c, y solo se la llama cuando se llega a un puntaje	*
+* igual al que se definio en frqclevel al comienzo. No recibe ni devuelve registros.					*
+*							    								*
+*************************************************************************************************************************
+*
+clevel	EQU	*
+	psha
+	ldaa	colevel	cargo en A la cantidad de niveles que me quedan con los colores cambiados
+	cmpa	#0	me fijo si no me quedan niveles para mostrar con los colores cambiados
+	staa	$5EFF	guardo el valor en el selector de colores, sin importar cual sea
+	beq	clevfin	en el caso de que sea un cero, ya tendre forzado el RGB, osea lo normal y termino la subrutina
+	deca		en el caso contrario decrementare la cantidad de niveles restantes en uno
+	staa	colevel
+clevfin	pula
+	rts
+*
+*
+*************************************************************************************************************************
+*															*
+* Subrut ripscrn: Esta subrutina se encarga de colocar todos las posiciones del bitmap display en negro con una 	*
+* animacion un poco divertida. No recibe ni devuelve parametros								*
+*							    								*
+*************************************************************************************************************************
+
+ripscrn	EQU	*
+	psha
+	pshb
+	pshy
+	pshx
+	ldx	#2	cargo un pequeño delay para que se vea de a poco el movimiento de los cuadraditos
+	ldy	#$5F00	me posiciono en la primera posicion de memoria del bmapdisplay
+	ldab	#36	Inicializo B como un contador con la cantidad de bloques del bitmap display
+	ldaa	#0	cargo el color negro en A
+loopscr	staa	0,Y	cargo el color negro en el bitmap display
+	jsr	delayX
+	iny		me muevo al siguiente cuadradito del display
+	decb		reduzco el contador para ver si ya revise todos los cuadrados del display
+	bne	loopscr	
+	pulx
+	puly
+	pulb
+	pula
+	rts
+*
+*
+*
+*************************************************************************************************************************
+*															*
+* Subrut inibdis: Esta subrutina se encarga de colocar todos las posiciones del bitmap display en su estado inicial	*
+*	es decir con el cuadrado verde (dino) a la izquierda y el paisaje detras. No recibe ni devuelve parametros	*
+*							    								*
+*************************************************************************************************************************
+*
+*
+*
+inibdis	EQU	*	
+	psha		*Programacion defensiva
+	pshb
+	pshx
+	ldaa	#cielo	*cargo en el registro A el valor del color cielo
+	ldab	#30	*cargo en el registro B el contador de posiciones
+	ldx	#$5F00	*cargo en el registro X el valor inicial del bitmap display
+sigodi1	staa	0,X	*coloco las primeras 30 posiciones con cielo
+	inx		*avanzo a la siguente posición
+	decb		*reduzco en uno el contador	
+	beq	inidis1	*me fijo si ya modifique todas las posiciones
+	jmp	sigodi1	*si el contador no llego a cero continuo 
+inidis1	ldaa	#arena	*cargo en el registro A el color de la arena
+	ldab	#6	*cargo en el registro B el contador de posiciones
+sigodis	staa	0,X	*coloco la posicion con arena
+	inx		*avanzo a la siguente posición
+	decb		*reduzco en uno el contador	
+	beq	inidis2	*me fijo si ya modifique todas las posiciones
+	jmp	sigodis	*si el contador no llego a cero continuo 
+inidis2	ldx	#$5F18	*cargamos la posici—n inicial del jugador
+	ldaa	#cldino	*cargamos el color de dino
+	staa	0,X	*dibujamos a dino en la posici—n inicial
+	pulx		*recupero registros
+	pulb
+	pula
+	rts
+*
+*
+*****************************************************************************************************************
+* delayX: La subrutina recibe por el registro X la cantidad de llamadas a delay, y no devuelve parametros. La funcion realiza un retardo  	*
+* de (cantidad de llamados en X*0,5) segundos. En el wookie aproximadamente, 100 repeticiones son 5 segundos de retardo.		*
+*****************************************************************************************************************
+delayX	equ	*		
+	pshx			;hacemos el backup del registro A, B y X
+
+loopd	jsr	delay		;realiza una llamada a la subrutina delay
+	dex			;decremento el contador
+	bne	loopd		;si el contador llego a 0 terminar
+	
+	pulx			;restauramos los backups			
+	rts
+
+
+*****************************************************************
+* delay: La subrutina no recibe y devuelve parametros. La funcion realiza un	*
+* retardo de 0,5 segundos.							*
+*****************************************************************
+delay	equ	*
+	pshx			;guardo el registro X porque se va a modificar	
+	pshy			;idem con el registro Y				
+	psha			;idem con el registro A			
+
+	ldx 	#98		;inicializo X1					
+	ldy 	#152		;inicializo X2					
+	ldaa	#11		;inicializo X3					
+
+loop	dex			;unidad minima de repeticion				
+	bne 	loop		;de X1 veces					
+
+	ldx 	#98		;reinicio X1					
+	dey			;resto uno a X2					
+	bne 	loop		;unidad secundaria de repeticion de X2 veces	
+
+	ldy 	#152		;reinicio X2					
+	deca			;resto uno a X3					
+	bne 	loop		;unidad terciaria de repeticion de X3 veces	
+
+	pula			;restauro el valor del registro A		
+	puly			;idem registro Y				
+	pulx			;idem registro X				
+	rts	
+*
+*****************************************************************************************
+* n_rand: La subrutina recibe no recibe parametros. La funcion lee el timer del HC11 y	*
+* genera un numero aleatorio entre 0 y 3 y lo devuelve por el registro A		*		
+*****************************************************************************************
+n_rand	equ	*
+	ldaa	$100F		;cargamos la parte baja del timer	
+	anda	#00000011b	;filtramos solo los ultimos 2 bits del byte
+	rts
+*
+*****************************************************************************************
+* n_rand: La subrutina recibe no recibe parametros. La funcion lee el timer del HC11 y	*
+* genera un numero aleatorio entre 0 y 3 y lo devuelve por el registro A		*		
+*****************************************************************************************
+n_rand1	equ	*
+	ldaa	$100F		;cargamos la parte baja del timer	
+	anda	#00000111b	;filtramos solo los ultimos 2 bits del byte
+	rts
+*
+*
+*
+*
+*
+*****************************************************************************************
+* 	initdis: Inicializa display (y teclado al dope porque no lo usamos)		*
+*****************************************************************************************
+*
+*
+initdis	equ	*
+	psha
+	ldaa #$0F       ;set for input/output
+	staa DDRC       ;C output
+	ldaa PIOC       ;get current value
+	anda #$FE       ;reset bit 0 to 0
+	staa PIOC       ;send it out
+	pula
+	rts		
+*
+*
+*****************************************************************
+*	Outchar: 	ACCA: Caracter a enviar			*
+*	  		ACCB: Posición (0-3)			*
+*****************************************************************
+*
+*
+outchar	equ	*
+	
+	stab	PORTCL     ;set the position 
+	staa	PORTB      ;set the character
+	
+	rts
+
+
+*
+*
+*****************************************
+* 	Secci—n de Interrupciones	*
+*****************************************
+*
+*
+
+	org	ISALT1			;interrupcion de salto 1
+salto1	equ	*
+	ldaa	ejump			;vemos si el salto esta habilitado
+	bne	fins1			;si el salto no esta habilitado, ignoramos la interrupcion
+	ldaa	#$FF
+	staa	ejump			;deshabilitamos el salto
+	staa	subiendo			;indicamos que el jugador esta subiendo
+	ldx	#$5F12			;cargamos la posicion de fin del salto
+	stx	jumpf			;guardamos la posicion de fin del salto
+fins1	rti
+
+
+	org	ISALT2			;interrupcion de salto 2
+salto2	equ	*
+	ldaa	ejump			;vemos si el salto esta habilitado
+	bne	fins2			;si el salto no esta habilitado, ignoramos la interrupcion
+	ldaa	#$FF
+	staa	ejump			;deshabilitamos el salto
+	staa	subiendo			;indicamos que el jugador esta subiendo
+	ldx	#$5F0C			;cargamos la posicion de fin del salto
+	stx	jumpf			;guardamos la posicion de fin del salto
+fins2	rti
+
+	org	IRQ			;guardamos las posiciones de memoria donde se ubicaran las subrutinas de interrupcion
+	fdb	ISALT1
+	org	XIRQ
+	fdb	ISALT2	
+	
+
+	org	STACK			;declaramos el stock
+stk	rmb	40
+TOS	equ	*-1
+
+
+ejump	fcb	$00			;si el valor es $00, el salto esta habilitado, si es $FF esta deshabilitado
+jumpi	fdb	$5F18			;posicion de inicio del salto (borde izquierdo de la pantalla)
+jumpf	fdb	$0000			;posicion de fin del salto
+subiendo	fcb	$00		;$FF si esta subiendo, $00 si esta bajando
+posact	fdb	$0000			;posicion actual del jugador en la pantalla
+puntaje	fdb	$0000			;puntaje que se mostrara en el display	
+objmp	rmb	N*obj_sz		;creamos el vector de objetos
+scoreadj	fcb	SCRADJ		;variable para guardar los frames restantes para aumentar los puntos del display
+enabgen	fcb	$00			;variable que indica si es posible generar un objeto
+frmcnt	fcb	$00			;variable que cuenta la cantidad de frames que pasaron desde que se creo el ultimo bloque doble
+objrec	fcb	$00			;constante que guarda si se creo un objeto de 2 en los ultimos 3 frames del juego, 
+*					;si es un $00 no se creo un bloque de 2 en los ultimos 3 frames
+colevel	fcb	$00			;creo una constante que guardara la cantidad de niveles que deberan hacerse en otro color
+
+
+*****************************************************************
+*	Tabla para la generacion de obstaculos			*
+* Atento, ya que les decremento 1 antes de mostrarlos, los	*
+* inicializo un bloque despues de donde estarian al principio	*
+*****************************************************************
+obstgen	EQU	*
+obstac1	EQU	*	este es el bloque de 1
+	fcb	6	genero el lifetime de 6
+	fdb	$5F1E	escribo solo en el primer cuadrado (piso +1)
+	fdb	$0000	terminador
+	fdb	$0000	terminador
+	fcb	rojo	le doy el color
+
+obstac2	EQU	*	este es el bloque de 2
+	fcb	6	genero el lifetime de 6 
+	fdb	$5F1E	escribo en el primer cuadrado (piso +1)
+	fdb	$5F18	escribo en el segundo cuadrado (piso +2)
+	fdb	$0000	terminador
+	fcb	amarill	le doy el color
+
+obstac3	EQU	*	este es el pajaro
+	fcb	6	genero el lifetime de 6
+	fdb	$5F12	escribo solo en el primer cuadrado (piso +3)
+	fdb	$0000	terminador
+	fdb	$0000	terminador
+	fcb	agua	le doy el color
+
+
+	end

@@ -1,0 +1,27 @@
+*****************************************************************
+*	Tabla para la generacion de obstaculos			*
+* Atento, ya que les decremento 1 antes de mostrarlos, los	*
+* inicializo un bloque despues de donde estarian al principio	*
+*****************************************************************
+obstgen	EQU	*
+obstac1	EQU	*	este es el bloque de 1
+	fcb	6	genero el lifetime de 6 (o podria ser 5)
+	fdb	$5F1E	escribo solo en el primer cuadrado (piso +1)
+	fdb	$0000	terminador
+	fdb	$0000	terminador
+	fcb	rojo	le doy el color
+
+obstac2	EQU	*	este es el bloque de 2
+	fcb	6	genero el lifetime de 6 (o podria ser 5)
+	fdb	$5F1E	escribo en el primer cuadrado (piso +1)
+	fdb	$5F18	escribo en el segundo cuadrado (piso +2)
+	fdb	$0000	terminador
+	fcb	amarill	le doy el color
+
+obstac3	EQU	*	este es el pajaro
+	fcb	6	genero el lifetime de 6 (o podria ser 5)
+	fdb	$5F12	escribo solo en el primer cuadrado (piso +3)
+	fdb	$0000	terminador
+	fdb	$0000	terminador
+	fcb	agua	le doy el color
+		
